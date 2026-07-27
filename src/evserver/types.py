@@ -13,12 +13,13 @@ WorkspaceId = Digest
 SnapshotId = Digest
 ManifestId = Digest
 ReferenceId = Digest
+ContentId = Digest
 
 
 @dataclass(frozen=True, slots=True)
 class Reference:
     file_path: Path
-    content_digest: Digest
+    content_digest: ContentId
 
     @property
     def id(self) -> ReferenceId:
@@ -27,28 +28,34 @@ class Reference:
 
 @dataclass(frozen=True, slots=True)
 class Manifest:
-    files: tuple[Reference, ...]
+    reference_ids: tuple[ReferenceId, ...]
 
     @property
     def id(self) -> ManifestId:
-        return blake3(dill.dumps(self.files)).hexdigest()
+        return blake3(dill.dumps(self.reference_ids)).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
 class Snapshot:
     comment: str | None
-    manifest: Manifest
+    manifest_id: ManifestId
 
     @property
     def id(self) -> SnapshotId:
-        return blake3(dill.dumps(self.comment, self.manifest)).hexdigest()
+        return blake3(dill.dumps(self.comment, self.manifest_id)).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
 class Workspace:
-    snapshots: tuple[Snapshot, ...]
     directory: Path
+    snapshot_ids: tuple[SnapshotId, ...]
 
     @property
     def id(self) -> SnapshotId:
         return blake3(dill.dumps(self.directory)).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class User:
+    id: UserId
+    workspace_ids: set[WorkspaceId]
