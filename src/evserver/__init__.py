@@ -1,14 +1,14 @@
-import uuid
+import uuid  # noqa: I001
 from contextlib import asynccontextmanager
 from http.client import HTTPException
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, TypedDict
+from typing import Annotated, TypedDict
 
 from fastapi import Depends, FastAPI
-from starlette.responses import Content
 
 from evserver.stores import DirectoryStore, FileStore, Store
 from evserver.types import (
+    Content,
     ContentId,
     Manifest,
     ManifestId,
@@ -22,10 +22,8 @@ from evserver.types import (
     WorkspaceId,
 )
 
-if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
-    from fastapi.requests import HTTPConnection
+from fastapi.requests import HTTPConnection  # noqa: TC002
+from collections.abc import AsyncGenerator  # noqa: TC003
 
 
 UserKey = UserId
@@ -91,7 +89,7 @@ def get_manifest_store(httpconnection: HTTPConnection) -> ManifestStore:
 
 
 def get_reference_store(httpconnection: HTTPConnection) -> ReferenceStore:
-    return httpconnection.state.referenc_store
+    return httpconnection.state.reference_store
 
 
 def get_content_store(httpconnection: HTTPConnection) -> ContentStore:
@@ -101,11 +99,11 @@ def get_content_store(httpconnection: HTTPConnection) -> ContentStore:
 @app.post("/user/register")
 async def register_user(
     user_store: Annotated[UserStore, Depends(get_user_store)],
-) -> UserId:
+) -> User:
     user_id = uuid.uuid4().hex
     user = User(user_id, set())
     await user_store.set(user_id, user)
-    return user_id
+    return user
 
 
 @app.post("/user/register/{user_id}")
@@ -240,7 +238,7 @@ async def delete_manifest(
     await manifest_store.delete(manifest_key)
 
 
-@app.get("/user/{user_id}/manifest/{manifest_id}")
+@app.get("/user/{user_id}/reference/{reference_id}")
 async def get_reference(
     user_id: UserId,
     reference_id: ReferenceId,
@@ -266,7 +264,7 @@ async def set_reference(
 async def delete_reference(
     user_id: UserId,
     reference_id: ReferenceId,
-    reference_store: Annotated[ManifestStore, Depends(get_manifest_store)],
+    reference_store: Annotated[ManifestStore, Depends(get_reference_store)],
 ) -> None:
     manifest_key = (user_id, reference_id)
     if not await reference_store.contains(manifest_key):
@@ -274,7 +272,7 @@ async def delete_reference(
     await reference_store.delete(manifest_key)
 
 
-@app.get("/user/{user_id}/manifest/{manifest_id}")
+@app.get("/user/{user_id}/content/{content_id}")
 async def get_content(
     user_id: UserId,
     content_id: ContentId,
@@ -300,7 +298,7 @@ async def set_content(
 async def delete_content(
     user_id: UserId,
     content_id: ContentId,
-    content_store: Annotated[ManifestStore, Depends(get_manifest_store)],
+    content_store: Annotated[ManifestStore, Depends(get_content_store)],
 ) -> None:
     manifest_key = (user_id, content_id)
     if not await content_store.contains(manifest_key):

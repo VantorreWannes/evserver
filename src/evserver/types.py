@@ -12,6 +12,7 @@ SnapshotId = Digest
 ManifestId = Digest
 ReferenceId = Digest
 ContentId = Digest
+Content = bytes
 
 
 @dataclass(frozen=True, slots=True)
