@@ -1,11 +1,9 @@
-from typing import TYPE_CHECKING
+import uuid
+from pathlib import Path  # noqa: TC003
 
 import dill
 from blake3 import blake3
 from pydantic.dataclasses import dataclass
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 Digest = str
 UserId = str
@@ -59,3 +57,11 @@ class Workspace:
 class User:
     id: UserId
     workspace_ids: set[WorkspaceId]
+
+    @classmethod
+    def random(cls) -> User:
+        return User(uuid.uuid4().hex, set())
+
+    @classmethod
+    def from_id(cls, user_id: UserId) -> User:
+        return User(user_id, set())

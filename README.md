@@ -31,7 +31,7 @@
 - Claims an available user.
 - If successful returns the claimed user.
 
-##### `PUT /user/register:id`
+##### `POST /user/register:id`
 
 - Attempts to claim the specfied user.
 
@@ -41,8 +41,8 @@
 
 ##### `GET /user/:user_id/`
 
-- Returns an array containing:
-  - All workspace IDs for the given user.
+- Returns an object containing:
+  - An array of all workspace IDs for the given user.
 
 #### Workspace
 
@@ -68,7 +68,7 @@
   - An array of all manifest IDs for the given user's snapshot.
   - An optional note string for the given user's snapshot.
 
-##### `POST /user/:user_id/snapshot/:snapshot_id`
+##### `PUT /user/:user_id/snapshot/:snapshot_id`
 
 - Create the user's specified snapshot from the provided snapshot object containing:
   - A manifest IDs for the given user's snapshot.
@@ -85,7 +85,7 @@
 - Returns an object containing:
   - An array of all reference IDs for the given user's manifest.
 
-##### `POST /user/:user_id/manifest/:manifest_id`
+##### `PUT /user/:user_id/manifest/:manifest_id`
 
 - Create the user's specified manifest from the provided manifest object containing:
   - An array of all reference IDs for the given user's manifest.
@@ -102,13 +102,29 @@
   - The reference's relative file path.
   - The reference's content digest.
 
-##### `POST /user/:user_id/reference/:reference_id`
+##### `PUT /user/:user_id/reference/:reference_id`
 
 - Create the user's specified reference from the provided reference object containing:
   - The reference's relative file path.
   - The reference's content digest.
 
 ##### `DELETE /user/:user_id/reference/:reference_id`
+
+- Forget the user's specified reference.
+
+#### Content
+
+##### `GET /user/:user_id/content/:content_id`
+
+- Returns a byte stream containing:
+  - The encoded content data.
+
+##### `PUT /user/:user_id/content/:content_id`
+
+- Create the user's specified reference from the provided content byte stream containing:
+  - The encoded content data.
+
+##### `DELETE /user/:user_id/content/:content_id`
 
 - Forget the user's specified reference.
 
