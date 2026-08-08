@@ -1,10 +1,9 @@
 import uuid  # noqa: I001
 from contextlib import asynccontextmanager
-from http.client import HTTPException
 from pathlib import Path
 from typing import Annotated, TypedDict
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 
 from evserver.stores import DirectoryStore, FileStore, Store
 from evserver.types import (
