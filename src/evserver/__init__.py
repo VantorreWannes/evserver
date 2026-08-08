@@ -263,7 +263,7 @@ async def set_reference(
 async def delete_reference(
     user_id: UserId,
     reference_id: ReferenceId,
-    reference_store: Annotated[ManifestStore, Depends(get_reference_store)],
+    reference_store: Annotated[ReferenceStore, Depends(get_reference_store)],
 ) -> None:
     manifest_key = (user_id, reference_id)
     if not await reference_store.contains(manifest_key):
@@ -297,7 +297,7 @@ async def set_content(
 async def delete_content(
     user_id: UserId,
     content_id: ContentId,
-    content_store: Annotated[ManifestStore, Depends(get_content_store)],
+    content_store: Annotated[ContentStore, Depends(get_content_store)],
 ) -> None:
     manifest_key = (user_id, content_id)
     if not await content_store.contains(manifest_key):
