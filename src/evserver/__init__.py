@@ -98,11 +98,11 @@ def get_content_store(httpconnection: HTTPConnection) -> ContentStore:
 @app.post("/user/register")
 async def register_user(
     user_store: Annotated[UserStore, Depends(get_user_store)],
-) -> User:
+) -> UserId:
     user_id = uuid.uuid4().hex
     user = User(user_id, set())
     await user_store.set(user_id, user)
-    return user
+    return user.id
 
 
 @app.post("/user/register/{user_id}")
