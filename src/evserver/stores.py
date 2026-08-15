@@ -1,71 +1,56 @@
 import shutil
-from collections.abc import Hashable
 from typing import TYPE_CHECKING
 
 import aiofiles
-import dill
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-
-class FileStore[K: Hashable, V]:
-    def __init__(self, path: Path) -> None:
-        self.path = path
-
-    @classmethod
-    def load(cls, path: Path) -> dict[K, V]:
-        if path.exists():
-            return dill.loads(path.read_bytes())  # noqa: S301
-        return {}
-
-    @classmethod
-    def save(cls, path: Path, key_values: dict[K, V]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(dill.dumps(key_values))
-
-    async def get(self, key: K) -> V:
-        return FileStore[K, V].load(self.path)[key]
-
-    async def set(self, key: K, value: V) -> None:
-        key_values = FileStore[K, V].load(self.path)
-        key_values[key] = value
-        FileStore[K, V].save(self.path, key_values)
-
-    async def delete(self, key: K) -> None:
-        key_values = FileStore[K, V].load(self.path)
-        key_values.pop(key)
-        FileStore[K, V].save(self.path, key_values)
-
-    async def keys(self) -> tuple[K, ...]:
-        return tuple(FileStore[K, V].load(self.path).keys())
-
-    async def contains(self, key: K) -> bool:
-        return key in FileStore[K, V].load(self.path)
+    from evserver.types import Hash, ObjectType, UserId
 
 
-class BlobStore:
-    def __init__(self, directory: Path) -> None:
-        self.directory = directory
+class Archive:
+    """Filesystem-backed store of content-addressed objects, partitioned by user and type."""  # noqa: E501
 
-    def _path(self, user_id: str, blob_hash: str) -> Path:
-        return self.directory / user_id / blob_hash
+    def __init__(self, root: Path) -> None:
+        self.root = root
 
-    async def contains(self, user_id: str, blob_hash: str) -> bool:
-        return self._path(user_id, blob_hash).is_file()
+    def _path(self, user_id: UserId, obj_type: ObjectType, obj_hash: Hash) -> Path:
+        return self.root / user_id / obj_type / obj_hash
 
-    async def get(self, user_id: str, blob_hash: str) -> bytes:
-        async with aiofiles.open(self._path(user_id, blob_hash), mode="rb") as f:
+    async def contains_user(self, user_id: UserId) -> bool:
+        return (self.root / user_id).is_dir()
+
+    async def add_user(self, user_id: UserId) -> None:
+        (self.root / user_id).mkdir(parents=True, exist_ok=False)
+
+    async def delete_user(self, user_id: UserId) -> None:
+        shutil.rmtree(self.root / user_id, ignore_errors=True)
+
+    async def contains(
+        self, user_id: UserId, obj_type: ObjectType, obj_hash: Hash
+    ) -> bool:
+        return self._path(user_id, obj_type, obj_hash).is_file()
+
+    async def get(self, user_id: UserId, obj_type: ObjectType, obj_hash: Hash) -> bytes:
+        async with aiofiles.open(self._path(user_id, obj_type, obj_hash), "rb") as f:
             return await f.read()
 
-    async def set(self, user_id: str, blob_hash: str, data: bytes) -> None:
-        path = self._path(user_id, blob_hash)
+    async def put(
+        self, user_id: UserId, obj_type: ObjectType, obj_hash: Hash, data: bytes
+    ) -> None:
+        path = self._path(user_id, obj_type, obj_hash)
         path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiofiles.open(path, mode="wb") as f:
+        async with aiofiles.open(path, "wb") as f:
             await f.write(data)
 
-    async def delete(self, user_id: str, blob_hash: str) -> None:
-        self._path(user_id, blob_hash).unlink(missing_ok=True)
+    async def delete(
+        self, user_id: UserId, obj_type: ObjectType, obj_hash: Hash
+    ) -> None:
+        self._path(user_id, obj_type, obj_hash).unlink(missing_ok=True)
 
-    async def delete_user(self, user_id: str) -> None:
-        shutil.rmtree(self.directory / user_id, ignore_errors=True)
+    async def hashes(self, user_id: UserId, obj_type: ObjectType) -> list[Hash]:
+        directory = self.root / user_id / obj_type
+        if not directory.is_dir():
+            return []
+        return sorted(p.name for p in directory.iterdir() if p.is_file())
