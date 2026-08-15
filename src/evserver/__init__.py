@@ -297,4 +297,4 @@ async def delete_workspace(
 
 
 def main() -> None:
-    uvicorn.run("evserver:app")
+    uvicorn.run("evserver:app", host="0.0.0.0", port=8000, workers=1)  # noqa: S104
