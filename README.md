@@ -1,141 +1,212 @@
-# EasyVersion
+# EasyVersion (ev) | System Specification
 
-### Goals
+**Document identifier:** EV-SPEC-001
+**Status:** Draft
+**Date:** 2026-08-15
 
-- **Many Archives:** Can store in many archives at once.
-- **Emergent Complexity:** Small implementation surface but reasonable usage requirements.
+---
 
-## Commands
+## 1. Scope
 
-- **`ev [COMMANDS | OPTIONS | ARGUMENTS | FLAGS]... [--help | -h]`:** List all sub commands + a small description of the intended usage.
-- **`ev archive <archive:URL> register [user:ID]`:** Request to claim a new user ID on the given archive URL.
-- **`ev archive <archive:URL> unregister <user:ID>`:** Request to be forgotten with the passed user ID on the given archive URL.
-- **`ev <workspace:PATH> login <api:URL> <user:ID>`:** Add this api URL + user ID to the list of active archives for the specified workspace.
-- **`ev <workspace:PATH> logout <api:URL> <user:ID>`:** Remove this api URL + user ID from the list of active archives for the specified workspace.
-- **`ev <workspace:PATH> save [--note <comment:TEXT> | -n <comment:TEXT>]`:** Save the current state of this workspace as a new version. With the specified comment if provided.
-- **`ev <workspace:PATH> list [--version <version:NUMBER> | -v <version:NUMBER>]`:** List every version of the passed workspace so far or just the specific one requested. With their respective notes if set.
-- **`ev <source:PATH> clone <target:PATH> [--version <version:NUMBER> | -v <version:NUMBER>]`:** Clone the source workspace to the target workspace. Target may not exist yet. Clone the workspace as it was on the specified version if passed.
-- **`ev <source:PATH> forget {--version <version:NUMBER> | -v <version:NUMBER> | --all | -a}`:** Request the active workspaces to forget the selected version. Or all if requested. Does not clear the current workspace state.
+This document specifies the requirements for **EasyVersion**, a version control system consisting of:
 
-## Archive
+- a) a command-line client (`ev`), and
+- b) an archive service accessed over HTTPS.
 
-- **URL Specified:** Each archive only be accessed programatically by users through its URL.
+This document is intended for implementers of the client and the archive service. It does not cover installation, user tutorials, or administration.
 
-### Endpoints
+## 2. Normative references
 
-#### Accounts
+- **RFC 9110**, _HTTP Semantics_
+- **BLAKE3** hash function specification
 
-##### `POST /user/register`
+## 3. Terms and definitions
 
-- Claims an available user.
-- If successful returns the claimed user ID.
+- **3.1 archive** | a remote service that stores blobs and workspace heads for users.
+- **3.2 blob** | an immutable, content-addressed byte sequence.
+- **3.3 workspace** | a directory under version control, identified by a `.ev` directory at its root.
+- **3.4 head** | the single mutable hash an archive stores per workspace.
+- **3.5 snapshot** | a blob identifying one version of a workspace.
+- **3.6 version number** | a presentation-layer integer derived by the client; not stored or transmitted.
 
-##### `POST /user/register:id`
+## 4. Conventions
 
-- Attempts to claim the specfied user.
+The key words below are to be interpreted as follows:
 
-##### `DELETE /user/:user_id/`
+| Keyword       | Interpretation                                           |
+| ------------- | -------------------------------------------------------- |
+| **shall**     | an absolute requirement                                  |
+| **shall not** | an absolute prohibition                                  |
+| **should**    | a recommendation; deviation permitted with justification |
+| **may**       | a permitted option                                       |
 
-- Attempts to forget the provided user.
+## 5. Design principles
 
-##### `GET /user/:user_id/`
+- **5.1 Scalar parameters.** Every parameter in the CLI and the API _shall_ be a scalar: one string, one integer, or one flag. No command or endpoint _shall_ accept a list, a pair, or a structured object as a parameter.
+- **5.2 Opaque blobs.** Composite data _shall_ exist only inside blobs. The archive _shall not_ parse blob contents.
+- **5.3 Content addressing.** Every blob _shall_ be identified by the BLAKE3 hash of its exact byte content.
 
-- Returns an object containing:
-  - An array of all workspace IDs for the given user.
+## 6. Data types
 
-#### Workspace
+Table 1 defines all scalar types used by this specification.
 
-##### `GET /user/:user_id/workspace/:workspace_id`
+**Table 1 | Scalar types**
 
-- Returns a workspace object containing:
-  - An array of all snapshot IDs for the given user's workspace.
+| Type     | Definition                                                                               |
+| -------- | ---------------------------------------------------------------------------------------- |
+| `UserId` | String, 1 to 64 chars, ASCII alphanumeric plus `-` and `_`                               |
+| `Hash`   | String, lowercase hex BLAKE3 digest, exactly 64 chars                                    |
+| `Url`    | String, valid HTTPS URL, no trailing slash, query, or fragment                           |
+| `Path`   | String, filesystem path                                                                  |
+| `Note`   | String, UTF-8, maximum 1024 chars                                                        |
+| `Number` | Integer, greater than or equal to 1                                                      |
+| `Bytes`  | Opaque byte sequence. Permitted only as a request or response body, never as a parameter |
 
-##### `PUT /user/:user_id/workspace/:workspace_id`
+## 7. Error handling
 
-- Replace the user's specified workspace with the new workspace object containing:
-  - An array of all snapshot IDs for the given user's workspace.
+- **7.1** Every failure _shall_ be reported as two scalars: a `code` string and a `message` string.
+- **7.2** The `code` _shall_ be one of: `not_found`, `conflict`, `invalid_hash`, `invalid_body`, `internal`.
+- **7.3** HTTP status mapping _shall_ be:
 
-##### `DELETE /user/:user_id/workspace/:workspace_id`
+| Code           | HTTP status |
+| -------------- | ----------- |
+| `not_found`    | 404         |
+| `conflict`     | 409         |
+| `invalid_hash` | 422         |
+| `invalid_body` | 400         |
+| `internal`     | 500         |
 
-- Forget the user's specified workspace.
+- **7.4** On internal error, the client _shall_ abort immediately and _shall not_ continue in a partially synced state.
 
-#### Snapshot
+## 8. Command-line interface
 
-##### `GET /user/:user_id/snapshot/:snapshot_id`
+### 8.1 General requirements
 
-- Returns an object containing:
-  - An array of all manifest IDs for the given user's snapshot.
-  - An optional note string for the given user's snapshot.
+- **8.1.1** All commands _shall_ accept `--help` or `-h`.
+- **8.1.2** The workspace path argument _shall_ default to the current directory.
+- **8.1.3** On success, output _shall_ consist of labeled scalars, one per line.
+- **8.1.4** On failure, the client _shall_ print the error code and message to stderr and exit with a non-zero status.
 
-##### `PUT /user/:user_id/snapshot/:snapshot_id`
+### 8.2 Archive account commands
 
-- Create the user's specified snapshot from the provided snapshot object containing:
-  - A manifest IDs for the given user's snapshot.
-  - An optional note string for the given user's snapshot.
+- **8.2.1** `ev archive <url> register`
+  The client _shall_ request a server-chosen `UserId` and print `user_id`.
+- **8.2.2** `ev archive <url> register <user_id>`
+  The client _shall_ request the given `UserId` and print `user_id`. The command _shall_ fail with `conflict` if the `UserId` is taken.
+- **8.2.3** `ev archive <url> unregister <user_id>`
+  The client _shall_ request deletion of the user and all associated data, and print `user_id`.
 
-##### `DELETE /user/:user_id/snapshot/:snapshot_id`
+### 8.3 Workspace configuration commands
 
-- Forget the user's specified snapshot.
+- **8.3.1** `ev [path] login <url> <user_id>`
+  The client _shall_ append one line `<url> <user_id>` to `.ev/archives`. The command _shall_ fail with `conflict` if that exact line exists.
+- **8.3.2** `ev [path] logout <url> <user_id>`
+  The client _shall_ remove that line. The command _shall_ fail with `not_found` if the line is absent.
 
-#### Manifest
+### 8.4 Versioning commands
 
-##### `GET /user/:user_id/manifest/:manifest_id`
+- **8.4.1** `ev [path] save`
+  The client _shall_ snapshot the workspace, push to every configured archive, and print `version` and `hash`. The operation _shall_ fail atomically if any archive fails.
+- **8.4.2** `ev [path] save -n <note>`
+  As 8.4.1, with the note embedded in the snapshot.
+- **8.4.3** `ev [path] list`
+  The client _shall_ print one line per version: `number hash note`. The note field may be empty.
+- **8.4.4** `ev [path] list <number>`
+  The client _shall_ print the single matching line. The command _shall_ fail with `not_found` for an unknown number.
+- **8.4.5** `ev clone <source_path> <target_path>`
+  The client _shall_ clone the source workspace at its latest version. The command _shall_ fail if the target path exists.
+- **8.4.6** `ev clone <source_path> <target_path> <number>`
+  As 8.4.5, at the given version.
+- **8.4.7** `ev [path] forget <number>`
+  The client _shall_ remove the latest version from the archive head. Local files _shall_ remain untouched. The given number _shall_ equal the latest version number, else the command _shall_ fail with `conflict`.
+- **8.4.8** `ev [path] forget --all`
+  The client _shall_ remove all versions from the archive. Exactly one of `<number>` (8.4.7) or `--all` _shall_ be provided.
 
-- Returns an object containing:
-  - An array of all reference IDs for the given user's manifest.
+## 9. Archive API
 
-##### `PUT /user/:user_id/manifest/:manifest_id`
+### 9.1 General requirements
 
-- Create the user's specified manifest from the provided manifest object containing:
-  - An array of all reference IDs for the given user's manifest.
+- **9.1.1** Every path parameter _shall_ be a scalar of type `UserId` or `Hash`.
+- **9.1.2** Every request and response body _shall_ be one of: `Bytes`, a single scalar string, or a flat JSON array of scalar strings. No nested objects _shall_ cross the API boundary.
 
-##### `DELETE /user/:user_id/manifest/:manifest_id`
+### 9.2 Account endpoints
 
-- Forget the user's specified manifest.
+- **9.2.1** `POST /user/register`
+  Response `201`, body one `UserId` string.
+- **9.2.2** `POST /user/register/<user_id>`
+  Response `201`, body the `UserId`; or `conflict`.
+- **9.2.3** `DELETE /user/<user_id>`
+  Response `200`, body the `UserId`; or `not_found`. The archive _shall_ delete all of the user's blobs and workspaces.
+- **9.2.4** `GET /user/<user_id>/workspaces`
+  Response `200`, body a JSON array of `Hash` strings; or `not_found`.
 
-#### Reference
+### 9.3 Blob endpoints
 
-##### `GET /user/:user_id/reference/:reference_id`
+- **9.3.1** `PUT /user/<user_id>/blob/<hash>` | body `Bytes`
+  The archive _shall_ verify that `BLAKE3(body)` equals the path hash, else respond `invalid_hash`. Response `201`, body the `Hash`. Re-uploading identical bytes _shall_ return `200`.
+- **9.3.2** `GET /user/<user_id>/blob/<hash>`
+  Response `200`, body `Bytes`; or `not_found`.
+- **9.3.3** `DELETE /user/<user_id>/blob/<hash>`
+  Response `200`; or `not_found`; or `conflict` if any workspace head reaches the blob.
 
-- Returns an object containing:
-  - The reference's relative file path.
-  - The reference's content digest.
+### 9.4 Workspace endpoints
 
-##### `PUT /user/:user_id/reference/:reference_id`
+A workspace on the archive _shall_ consist of a single mutable `Hash`: the head. History _shall not_ be stored by the archive.
 
-- Create the user's specified reference from the provided reference object containing:
-  - The reference's relative file path.
-  - The reference's content digest.
+- **9.4.1** `GET /user/<user_id>/workspace/<hash>`
+  Response `200`, body one `Hash` string (the head); or `not_found`.
+- **9.4.2** `PUT /user/<user_id>/workspace/<hash>` | body one `Hash` string
+  The archive _shall_ verify the referenced blob exists, else respond `invalid_body`. Response `200`.
+- **9.4.3** `DELETE /user/<user_id>/workspace/<hash>`
+  Response `200`; or `not_found`.
 
-##### `DELETE /user/:user_id/reference/:reference_id`
+### 9.5 Archive invariants
 
-- Forget the user's specified reference.
+- **9.5.1** Blobs _shall_ be immutable.
+- **9.5.2** Blob uploads _shall_ be idempotent.
+- **9.5.3** A blob _shall_ be deleted only when no workspace head reaches it.
+- **9.5.4** Archives _may_ garbage-collect unreachable blobs lazily.
 
-#### Content
+## 10. Client requirements
 
-##### `GET /user/:user_id/content/:content_id`
+### 10.1 Blob schemas
 
-- Returns a byte stream containing:
-  - The encoded content data.
+Blob schemas are client-side only and _shall_ never appear as API parameters. Each schema _shall_ be flat.
 
-##### `PUT /user/:user_id/content/:content_id`
+- **10.1.1 Content blob** | raw file bytes.
+- **10.1.2 Manifest blob** | lines of `<content_hash> <relative_path>`, two scalars per line.
+- **10.1.3 Snapshot blob** | three scalar fields: `manifest` (`Hash`), `parent` (`Hash`, empty for the first version), `note` (string, may be empty).
 
-- Create the user's specified reference from the provided content byte stream containing:
-  - The encoded content data.
+### 10.2 Version numbering
 
-##### `DELETE /user/:user_id/content/:content_id`
+- **10.2.1** The hash of a snapshot blob _shall_ be the version's identity.
+- **10.2.2** Version numbers _shall_ be derived by the client by walking the parent chain from the head; the oldest snapshot is version 1.
 
-- Forget the user's specified reference.
+### 10.3 Configuration
 
-### Invariants
+- **10.3.1** All configuration _shall_ reside in `.ev/` at the workspace root.
+- **10.3.2** `.ev/archives` _shall_ consist of lines of `<url> <user_id>`.
 
-- All non user IDs are blake3 hashes.
+### 10.4 Save pipeline
 
-## Client
+- **10.4.1** `save` _shall_ execute one deterministic pipeline:
+  1. hash file contents,
+  2. write the manifest blob,
+  3. write the snapshot blob with the current head as parent,
+  4. push missing blobs to every archive,
+  5. PUT the new head.
 
-### Invariants
+  The same pipeline _shall_ serve one or many archives.
 
-- All config information is stored in the `.ev` folder at the workspace root.
-- The workspace login command appends the provided archive configuration to the currently active archive configurations in `.ev/archives`.
-- If an internal error happens the program should never continue.
-- User IDs are provided and used as is by the archive. No extra mapping.
+### 10.5 Forget semantics
+
+- **10.5.1** `forget <number>` _shall_ rewrite the head to that version's parent. Only the latest version may be forgotten individually.
+- **10.5.2** Blob reclamation _shall_ be the archive's lazy garbage-collection concern (see 9.5.4).
+
+---
+
+## Annex A (informative) | Rationale
+
+- **A.1** The mutable workspace state is one hash rather than a version list because linked history belongs in immutable, content-addressed blobs.
+- **A.2** Version numbers are derived rather than stored to remove any possibility of disagreement between client and server.
+- **A.3** Restricting `forget` to the latest version keeps the rule "history is immutable" absolute.

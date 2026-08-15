@@ -1,80 +1,15 @@
-import asyncio
-from abc import ABC, abstractmethod
+import shutil
 from collections.abc import Hashable
-from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, override
+from typing import TYPE_CHECKING
 
 import aiofiles
 import dill
-from blake3 import blake3
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
-
-    from evserver.types import Digest
+    from pathlib import Path
 
 
-class Store[K, V](Protocol):
-    def get(self, key: K) -> Awaitable[V]: ...
-
-    def set(self, key: K, value: V) -> Awaitable[None]: ...
-
-    def delete(self, key: K) -> Awaitable[None]: ...
-
-    def keys(self) -> Awaitable[tuple[K, ...]]: ...
-
-    def contains(self, key: K) -> Awaitable[bool]: ...
-
-    def values(self) -> Awaitable[tuple[V, ...]]: ...
-
-    def length(self) -> Awaitable[int]: ...
-
-
-class BaseStore[K, V](ABC):
-    @abstractmethod
-    def get(self, key: K) -> Awaitable[V]: ...
-
-    @abstractmethod
-    def set(self, key: K, value: V) -> Awaitable[None]: ...
-
-    @abstractmethod
-    def delete(self, key: K) -> Awaitable[None]: ...
-
-    @abstractmethod
-    def keys(self) -> Awaitable[tuple[K, ...]]: ...
-
-    async def contains(self, key: K) -> bool:
-        return key in await self.keys()
-
-    async def values(self) -> tuple[V, ...]:
-        return tuple(await asyncio.gather(*[self.get(k) for k in await self.keys()]))
-
-    async def length(self) -> int:
-        return len(await self.keys())
-
-
-class MemoryStore[K: Hashable, V](BaseStore[K, V]):
-    def __init__(self) -> None:
-        self._store: dict[K, V] = {}
-
-    @override
-    async def get(self, key: K) -> V:
-        return self._store[key]
-
-    @override
-    async def set(self, key: K, value: V) -> None:
-        self._store[key] = value
-
-    @override
-    async def delete(self, key: K) -> None:
-        self._store.pop(key, None)
-
-    @override
-    async def keys(self) -> tuple[K, ...]:
-        return tuple(self._store.keys())
-
-
-class FileStore[K: Hashable, V](BaseStore[K, V]):
+class FileStore[K: Hashable, V]:
     def __init__(self, path: Path) -> None:
         self.path = path
 
@@ -89,64 +24,48 @@ class FileStore[K: Hashable, V](BaseStore[K, V]):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(dill.dumps(key_values))
 
-    @override
     async def get(self, key: K) -> V:
-        key_values = FileStore[K, V].load(self.path)
-        return key_values[key]
+        return FileStore[K, V].load(self.path)[key]
 
-    @override
     async def set(self, key: K, value: V) -> None:
         key_values = FileStore[K, V].load(self.path)
         key_values[key] = value
         FileStore[K, V].save(self.path, key_values)
 
-    @override
     async def delete(self, key: K) -> None:
         key_values = FileStore[K, V].load(self.path)
         key_values.pop(key)
         FileStore[K, V].save(self.path, key_values)
 
-    @override
     async def keys(self) -> tuple[K, ...]:
         return tuple(FileStore[K, V].load(self.path).keys())
 
+    async def contains(self, key: K) -> bool:
+        return key in FileStore[K, V].load(self.path)
 
-class DirectoryStore[K, V](BaseStore[K, V]):
+
+class BlobStore:
     def __init__(self, directory: Path) -> None:
         self.directory = directory
-        self.key_store = FileStore[K, Path](directory / "index.dill")
 
-    @classmethod
-    def digest(cls, key: K) -> Digest:
-        return blake3(dill.dumps(key)).hexdigest()
+    def _path(self, user_id: str, blob_hash: str) -> Path:
+        return self.directory / user_id / blob_hash
 
-    def filepath(self, key: K) -> Path:
-        return self.directory / self.digest(key)
+    async def contains(self, user_id: str, blob_hash: str) -> bool:
+        return self._path(user_id, blob_hash).is_file()
 
-    @override
-    async def get(self, key: K) -> V:
-        filepath = await self.key_store.get(key)
-        async with aiofiles.open(filepath, mode="rb") as f:
-            data = await f.read()
-        return dill.loads(data)  # noqa: S301
+    async def get(self, user_id: str, blob_hash: str) -> bytes:
+        async with aiofiles.open(self._path(user_id, blob_hash), mode="rb") as f:
+            return await f.read()
 
-    @override
-    async def set(self, key: K, value: V) -> None:
-        self.directory.mkdir(parents=True, exist_ok=True)
-        filepath = self.filepath(key)
-        await self.key_store.set(key, filepath)
-        data = dill.dumps(value)
-        async with aiofiles.open(filepath, mode="wb") as f:
+    async def set(self, user_id: str, blob_hash: str, data: bytes) -> None:
+        path = self._path(user_id, blob_hash)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        async with aiofiles.open(path, mode="wb") as f:
             await f.write(data)
-        await self.key_store.set(key, filepath)
 
-    @override
-    async def delete(self, key: K) -> None:
-        filepath = await self.key_store.get(key)
-        if filepath and filepath.exists():
-            filepath.unlink()
-        await self.key_store.delete(key)
+    async def delete(self, user_id: str, blob_hash: str) -> None:
+        self._path(user_id, blob_hash).unlink(missing_ok=True)
 
-    @override
-    async def keys(self) -> tuple[K, ...]:
-        return await self.key_store.keys()
+    async def delete_user(self, user_id: str) -> None:
+        shutil.rmtree(self.directory / user_id, ignore_errors=True)

@@ -1,305 +1,300 @@
-import uuid  # noqa: I001
+import uuid
+from collections.abc import AsyncGenerator  # noqa: TC003
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
-from fastapi import Depends, FastAPI, HTTPException
+import uvicorn
+from blake3 import blake3
+from fastapi import Body, Depends, FastAPI, Request, Response
+from fastapi.responses import JSONResponse, PlainTextResponse
+from pydantic import BaseModel
 
-from evserver.stores import DirectoryStore, FileStore, Store
-from evserver.types import (
-    Content,
-    ContentId,
-    Manifest,
-    ManifestId,
-    Reference,
-    ReferenceId,
-    Snapshot,
-    SnapshotId,
-    User,
-    UserId,
-    Workspace,
-    WorkspaceId,
-)
+from evserver.stores import BlobStore, FileStore
+from evserver.types import HASH_PATTERN, USER_ID_PATTERN, Hash, UserId
 
-from fastapi.requests import HTTPConnection  # noqa: TC002
-from collections.abc import AsyncGenerator  # noqa: TC003
-
-
-UserKey = UserId
-WorkspaceKey = tuple[UserId, WorkspaceId]
-SnapshotKey = tuple[UserId, SnapshotId]
-ManifestKey = tuple[UserId, ManifestId]
-ReferenceKey = tuple[UserId, ReferenceId]
-ContentKey = tuple[UserId, ContentId]
-
-
-UserStore = Store[UserId, User]
-WorkspaceStore = Store[WorkspaceKey, Workspace]
-SnapshotStore = Store[SnapshotKey, Snapshot]
-ManifestStore = Store[ManifestKey, Manifest]
-ReferenceStore = Store[ReferenceKey, Reference]
-ContentStore = Store[ContentKey, Content]
+UserStore = FileStore[UserId, None]
+WorkspaceStore = FileStore[tuple[UserId, Hash], Hash]
 
 
 class State(TypedDict):
     user_store: UserStore
     workspace_store: WorkspaceStore
-    snapshot_store: SnapshotStore
-    manifest_store: ManifestStore
-    reference_store: ReferenceStore
-    content_store: ContentStore
+    blob_store: BlobStore
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[State]:
-    user_store = FileStore(Path("data/users.dill"))
-    workspace_store = FileStore(Path("data/workspaces.dill"))
-    snapshot_store = FileStore(Path("data/snapshots.dill"))
-    manifest_store = FileStore(Path("data/manifests.dill"))
-    reference_store = FileStore(Path("data/references.dill"))
-    content_store = DirectoryStore(Path("data/contents"))
     yield State(
-        user_store=user_store,
-        workspace_store=workspace_store,
-        snapshot_store=snapshot_store,
-        manifest_store=manifest_store,
-        reference_store=reference_store,
-        content_store=content_store,
+        user_store=FileStore(Path("data/users.dill")),
+        workspace_store=FileStore(Path("data/workspaces.dill")),
+        blob_store=BlobStore(Path("data/blobs")),
     )
 
 
 app = FastAPI(lifespan=lifespan)
 
+ErrorCode = Literal["not_found", "conflict", "invalid_hash", "invalid_body", "internal"]
 
-def get_user_store(httpconnection: HTTPConnection) -> UserStore:
-    return httpconnection.state.user_store
-
-
-def get_workspace_store(httpconnection: HTTPConnection) -> WorkspaceStore:
-    return httpconnection.state.workspace_store
-
-
-def get_snapshot_store(httpconnection: HTTPConnection) -> SnapshotStore:
-    return httpconnection.state.snapshot_store
+ERROR_STATUS: dict[ErrorCode, int] = {
+    "not_found": 404,
+    "conflict": 409,
+    "invalid_hash": 422,
+    "invalid_body": 400,
+    "internal": 500,
+}
 
 
-def get_manifest_store(httpconnection: HTTPConnection) -> ManifestStore:
-    return httpconnection.state.manifest_store
+class ErrorBody(BaseModel):
+    code: ErrorCode
+    message: str
 
 
-def get_reference_store(httpconnection: HTTPConnection) -> ReferenceStore:
-    return httpconnection.state.reference_store
+def error(code: ErrorCode, message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=ERROR_STATUS[code],
+        content=ErrorBody(code=code, message=message).model_dump(),
+    )
 
 
-def get_content_store(httpconnection: HTTPConnection) -> ContentStore:
-    return httpconnection.state.content_store
+def get_user_store(request: Request) -> UserStore:
+    return request.state.user_store
 
 
-@app.post("/user/register")
-async def register_user(
-    user_store: Annotated[UserStore, Depends(get_user_store)],
-) -> UserId:
+def get_workspace_store(request: Request) -> WorkspaceStore:
+    return request.state.workspace_store
+
+
+def get_blob_store(request: Request) -> BlobStore:
+    return request.state.blob_store
+
+
+UserStoreDep = Annotated[UserStore, Depends(get_user_store)]
+WorkspaceStoreDep = Annotated[WorkspaceStore, Depends(get_workspace_store)]
+BlobStoreDep = Annotated[BlobStore, Depends(get_blob_store)]
+
+
+def validate_user_id(user_id: UserId) -> JSONResponse | None:
+    if not USER_ID_PATTERN.fullmatch(user_id):
+        return error("invalid_body", f'Invalid user id: "{user_id}".')
+    return None
+
+
+def validate_hash(blob_hash: Hash) -> JSONResponse | None:
+    if not HASH_PATTERN.fullmatch(blob_hash):
+        return error("invalid_hash", f'Invalid hash: "{blob_hash}".')
+    return None
+
+
+async def require_user(user_store: UserStore, user_id: UserId) -> JSONResponse | None:
+    if not await user_store.contains(user_id):
+        return error("not_found", f'User: "{user_id}" does not exist.')
+    return None
+
+
+@app.post(
+    "/user/register",
+    response_model=None,
+    status_code=201,
+    response_class=PlainTextResponse,
+)
+async def register_user(user_store: UserStoreDep) -> UserId:
     user_id = uuid.uuid4().hex
-    user = User(user_id, set())
-    await user_store.set(user_id, user)
-    return user.id
+    await user_store.set(user_id, None)
+    return user_id
 
 
-@app.post("/user/register/{user_id}")
+@app.post(
+    "/user/register/{user_id}",
+    response_model=None,
+    status_code=201,
+    response_class=PlainTextResponse,
+)
 async def claim_user(
-    user_id: UserId,
-    user_store: Annotated[UserStore, Depends(get_user_store)],
-) -> None:
+    user_id: UserId, user_store: UserStoreDep
+) -> UserId | JSONResponse:
+    if err := validate_user_id(user_id):
+        return err
     if await user_store.contains(user_id):
-        raise HTTPException(404, f'User: "{user_id}" already exists.')
-    await user_store.set(user_id, User.from_id(user_id))
+        return error("conflict", f'User: "{user_id}" already exists.')
+    await user_store.set(user_id, None)
+    return user_id
 
 
-@app.delete("/user/{user_id}")
+@app.delete("/user/{user_id}", response_model=None, response_class=PlainTextResponse)
 async def delete_user(
     user_id: UserId,
-    user_store: Annotated[UserStore, Depends(get_user_store)],
-) -> None:
-    if not await user_store.contains(user_id):
-        raise HTTPException(404, f'User: "{user_id}" does not exists.')
+    user_store: UserStoreDep,
+    workspace_store: WorkspaceStoreDep,
+    blob_store: BlobStoreDep,
+) -> UserId | JSONResponse:
+    if err := await require_user(user_store, user_id):
+        return err
+    for key in await workspace_store.keys():
+        if key[0] == user_id:
+            await workspace_store.delete(key)
+    await blob_store.delete_user(user_id)
     await user_store.delete(user_id)
+    return user_id
 
 
-@app.get("/user/{user_id}")
-async def get_user(
+@app.get("/user/{user_id}/workspaces", response_model=None)
+async def get_workspaces(
     user_id: UserId,
-    user_store: Annotated[UserStore, Depends(get_user_store)],
-) -> User:
-    if not await user_store.contains(user_id):
-        raise HTTPException(404, f'User: "{user_id}" does not exists.')
-    return await user_store.get(user_id)
+    user_store: UserStoreDep,
+    workspace_store: WorkspaceStoreDep,
+) -> list[Hash] | JSONResponse:
+    if err := await require_user(user_store, user_id):
+        return err
+    return [
+        workspace_id
+        for uid, workspace_id in await workspace_store.keys()
+        if uid == user_id
+    ]
 
 
-@app.get("/user/{user_id}/workspace/{workspace_id}")
+@app.put(
+    "/user/{user_id}/blob/{blob_hash}",
+    response_model=None,
+    response_class=PlainTextResponse,
+)
+async def put_blob(
+    user_id: UserId,
+    blob_hash: Hash,
+    request: Request,
+    user_store: UserStoreDep,
+    blob_store: BlobStoreDep,
+) -> Response:
+    if err := validate_hash(blob_hash):
+        return err
+    if err := await require_user(user_store, user_id):
+        return err
+    body = await request.body()
+    if blake3(body).hexdigest() != blob_hash:
+        return error("invalid_hash", "Body does not match the path hash.")
+    if await blob_store.contains(user_id, blob_hash):
+        return PlainTextResponse(blob_hash, status_code=200)
+    await blob_store.set(user_id, blob_hash, body)
+    return PlainTextResponse(blob_hash, status_code=201)
+
+
+@app.get("/user/{user_id}/blob/{blob_hash}", response_model=None)
+async def get_blob(
+    user_id: UserId,
+    blob_hash: Hash,
+    user_store: UserStoreDep,
+    blob_store: BlobStoreDep,
+) -> Response:
+    if err := validate_hash(blob_hash):
+        return err
+    if err := await require_user(user_store, user_id):
+        return err
+    if not await blob_store.contains(user_id, blob_hash):
+        return error("not_found", f'Blob: "{blob_hash}" does not exist.')
+    return Response(
+        content=await blob_store.get(user_id, blob_hash),
+        media_type="application/octet-stream",
+    )
+
+
+@app.delete(
+    "/user/{user_id}/blob/{blob_hash}",
+    response_model=None,
+    response_class=PlainTextResponse,
+)
+async def delete_blob(
+    user_id: UserId,
+    blob_hash: Hash,
+    user_store: UserStoreDep,
+    workspace_store: WorkspaceStoreDep,
+    blob_store: BlobStoreDep,
+) -> Response:
+    if err := validate_hash(blob_hash):
+        return err
+    if err := await require_user(user_store, user_id):
+        return err
+    if not await blob_store.contains(user_id, blob_hash):
+        return error("not_found", f'Blob: "{blob_hash}" does not exist.')
+    heads = [
+        await workspace_store.get(k)
+        for k in await workspace_store.keys()
+        if k[0] == user_id
+    ]
+    if blob_hash in heads:
+        return error(
+            "conflict", f'Blob: "{blob_hash}" is referenced by a workspace head.'
+        )
+    await blob_store.delete(user_id, blob_hash)
+    return PlainTextResponse(blob_hash)
+
+
+@app.get(
+    "/user/{user_id}/workspace/{workspace_hash}",
+    response_model=None,
+    response_class=PlainTextResponse,
+)
 async def get_workspace(
     user_id: UserId,
-    workspace_id: WorkspaceId,
-    workspace_store: Annotated[WorkspaceStore, Depends(get_workspace_store)],
-) -> Workspace:
-    workspace_key = (user_id, workspace_id)
-    if not await workspace_store.contains(workspace_key):
-        raise HTTPException(404, f'Workspace: "{workspace_key}" does not exists.')
-    return await workspace_store.get(workspace_key)
+    workspace_hash: Hash,
+    user_store: UserStoreDep,
+    workspace_store: WorkspaceStoreDep,
+) -> Hash | JSONResponse:
+    if err := validate_hash(workspace_hash):
+        return err
+    if err := await require_user(user_store, user_id):
+        return err
+    key = (user_id, workspace_hash)
+    if not await workspace_store.contains(key):
+        return error("not_found", f'Workspace: "{workspace_hash}" does not exist.')
+    return await workspace_store.get(key)
 
 
-@app.put("/user/{user_id}/workspace/{workspace_id}")
-async def set_workspace(
+@app.put(
+    "/user/{user_id}/workspace/{workspace_hash}",
+    response_model=None,
+    response_class=PlainTextResponse,
+)
+async def put_workspace(  # noqa: PLR0913, PLR0917
     user_id: UserId,
-    workspace_id: WorkspaceId,
-    workspace: Workspace,
-    workspace_store: Annotated[WorkspaceStore, Depends(get_workspace_store)],
-) -> None:
-    await workspace_store.set((user_id, workspace_id), workspace)
+    workspace_hash: Hash,
+    head: Annotated[str, Body(media_type="text/plain")],
+    user_store: UserStoreDep,
+    workspace_store: WorkspaceStoreDep,
+    blob_store: BlobStoreDep,
+) -> Response:
+    if err := validate_hash(workspace_hash):
+        return err
+    if err := await require_user(user_store, user_id):
+        return err
+    if err := validate_hash(head):
+        return error("invalid_body", f'Invalid head hash: "{head}".')
+    if not await blob_store.contains(user_id, head):
+        return error("invalid_body", f'Head blob: "{head}" does not exist.')
+    await workspace_store.set((user_id, workspace_hash), head)
+    return PlainTextResponse(workspace_hash)
 
 
-@app.delete("/user/{user_id}/workspace/{workspace_id}")
+@app.delete(
+    "/user/{user_id}/workspace/{workspace_hash}",
+    response_model=None,
+    response_class=PlainTextResponse,
+)
 async def delete_workspace(
     user_id: UserId,
-    workspace_id: WorkspaceId,
-    workspace_store: Annotated[WorkspaceStore, Depends(get_workspace_store)],
-) -> None:
-    workspace_key = (user_id, workspace_id)
-    if not await workspace_store.contains(workspace_key):
-        raise HTTPException(404, f'Workspace: "{workspace_key}" does not exists.')
-    await workspace_store.delete(workspace_key)
+    workspace_hash: Hash,
+    user_store: UserStoreDep,
+    workspace_store: WorkspaceStoreDep,
+) -> Hash | JSONResponse:
+    if err := validate_hash(workspace_hash):
+        return err
+    if err := await require_user(user_store, user_id):
+        return err
+    key = (user_id, workspace_hash)
+    if not await workspace_store.contains(key):
+        return error("not_found", f'Workspace: "{workspace_hash}" does not exist.')
+    await workspace_store.delete(key)
+    return workspace_hash
 
 
-@app.get("/user/{user_id}/snapshot/{snapshot_id}")
-async def get_snapshot(
-    user_id: UserId,
-    snapshot_id: SnapshotId,
-    snapshot_store: Annotated[SnapshotStore, Depends(get_snapshot_store)],
-) -> Snapshot:
-    snapshot_key = (user_id, snapshot_id)
-    if not await snapshot_store.contains(snapshot_key):
-        raise HTTPException(404, f'Snapshot: "{snapshot_key}" does not exists.')
-    return await snapshot_store.get(snapshot_key)
-
-
-@app.put("/user/{user_id}/snapshot/{snapshot_id}")
-async def set_snapshot(
-    user_id: UserId,
-    snapshot_id: SnapshotId,
-    snapshot: Snapshot,
-    snapshot_store: Annotated[SnapshotStore, Depends(get_snapshot_store)],
-) -> None:
-    await snapshot_store.set((user_id, snapshot_id), snapshot)
-
-
-@app.delete("/user/{user_id}/snapshot/{snapshot_id}")
-async def delete_snapshot(
-    user_id: UserId,
-    snapshot_id: SnapshotId,
-    snapshot_store: Annotated[SnapshotStore, Depends(get_snapshot_store)],
-) -> None:
-    snapshot_key = (user_id, snapshot_id)
-    if not await snapshot_store.contains(snapshot_key):
-        raise HTTPException(404, f'Snapshot: "{snapshot_key}" does not exists.')
-    await snapshot_store.delete(snapshot_key)
-
-
-@app.get("/user/{user_id}/manifest/{manifest_id}")
-async def get_manifest(
-    user_id: UserId,
-    manifest_id: ManifestId,
-    manifest_store: Annotated[ManifestStore, Depends(get_manifest_store)],
-) -> Manifest:
-    manifest_key = (user_id, manifest_id)
-    if not await manifest_store.contains(manifest_key):
-        raise HTTPException(404, f'Manifest: "{manifest_key}" does not exists.')
-    return await manifest_store.get(manifest_key)
-
-
-@app.put("/user/{user_id}/manifest/{manifest_id}")
-async def set_manifest(
-    user_id: UserId,
-    manifest_id: ManifestId,
-    manifest: Manifest,
-    manifest_store: Annotated[ManifestStore, Depends(get_manifest_store)],
-) -> None:
-    await manifest_store.set((user_id, manifest_id), manifest)
-
-
-@app.delete("/user/{user_id}/manifest/{manifest_id}")
-async def delete_manifest(
-    user_id: UserId,
-    manifest_id: ManifestId,
-    manifest_store: Annotated[ManifestStore, Depends(get_manifest_store)],
-) -> None:
-    manifest_key = (user_id, manifest_id)
-    if not await manifest_store.contains(manifest_key):
-        raise HTTPException(404, f'Manifest: "{manifest_key}" does not exists.')
-    await manifest_store.delete(manifest_key)
-
-
-@app.get("/user/{user_id}/reference/{reference_id}")
-async def get_reference(
-    user_id: UserId,
-    reference_id: ReferenceId,
-    reference_store: Annotated[ReferenceStore, Depends(get_reference_store)],
-) -> Reference:
-    reference_key = (user_id, reference_id)
-    if not await reference_store.contains(reference_key):
-        raise HTTPException(404, f'Reference: "{reference_key}" does not exists.')
-    return await reference_store.get(reference_key)
-
-
-@app.put("/user/{user_id}/reference/{reference_id}")
-async def set_reference(
-    user_id: UserId,
-    reference_id: ReferenceId,
-    reference: Reference,
-    reference_store: Annotated[ReferenceStore, Depends(get_reference_store)],
-) -> None:
-    await reference_store.set((user_id, reference_id), reference)
-
-
-@app.delete("/user/{user_id}/reference/{reference_id}")
-async def delete_reference(
-    user_id: UserId,
-    reference_id: ReferenceId,
-    reference_store: Annotated[ReferenceStore, Depends(get_reference_store)],
-) -> None:
-    manifest_key = (user_id, reference_id)
-    if not await reference_store.contains(manifest_key):
-        raise HTTPException(404, f'Reference: "{manifest_key}" does not exists.')
-    await reference_store.delete(manifest_key)
-
-
-@app.get("/user/{user_id}/content/{content_id}")
-async def get_content(
-    user_id: UserId,
-    content_id: ContentId,
-    content_store: Annotated[ContentStore, Depends(get_content_store)],
-) -> Content:
-    content_key = (user_id, content_id)
-    if not await content_store.contains(content_key):
-        raise HTTPException(404, f'Content: "{content_key}" does not exists.')
-    return await content_store.get(content_key)
-
-
-@app.put("/user/{user_id}/content/{content_id}")
-async def set_content(
-    user_id: UserId,
-    content_id: ContentId,
-    content: Content,
-    content_store: Annotated[ContentStore, Depends(get_content_store)],
-) -> None:
-    await content_store.set((user_id, content_id), content)
-
-
-@app.delete("/user/{user_id}/content/{content_id}")
-async def delete_content(
-    user_id: UserId,
-    content_id: ContentId,
-    content_store: Annotated[ContentStore, Depends(get_content_store)],
-) -> None:
-    manifest_key = (user_id, content_id)
-    if not await content_store.contains(manifest_key):
-        raise HTTPException(404, f'Content: "{manifest_key}" does not exists.')
-    await content_store.delete(manifest_key)
+def main() -> None:
+    uvicorn.run("evserver:app")
