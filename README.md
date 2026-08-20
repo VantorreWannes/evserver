@@ -1,4 +1,4 @@
-# Easysnapshot
+# EasyVersion
 
 ### Goals
 
