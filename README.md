@@ -32,6 +32,7 @@ Five distinct types, forming one chain from workspace to content:
 
 | Type        | Contents                                |
 | ----------- | --------------------------------------- |
+| `user`      | Metadata about the user account         |
 | `workspace` | An array of snapshot hashes             |
 | `snapshot`  | A manifest hash and an optional note    |
 | `manifest`  | An array of reference hashes            |
@@ -40,10 +41,10 @@ Five distinct types, forming one chain from workspace to content:
 
 ### Endpoints
 
-- **`HEAD <type:ID>`:** Check whether the Type ID already exists.
-- **`GET <type:ID>`:** Returns an object with the Type's data.
-- **`PUT <type:ID>`:** Sets the object with the Type's data.
-- **`DELETE <type:ID>`:** Forget the given Type ID.
+- **`HEAD /type/<type:ID>`:** Check whether the Type ID already exists.
+- **`GET /type/<type:ID>`:** Returns an object with the Type's data.
+- **`PUT /type/<type:ID>`:** Sets the object with the Type's data.
+- **`DELETE /type/<type:ID>`:** Forget the given Type ID.
 
 ### Invariants
 

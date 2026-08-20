@@ -1,193 +1,133 @@
-import uuid
 from collections.abc import AsyncGenerator  # noqa: TC003
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, TypedDict
 
 import uvicorn
-from blake3 import blake3
-from fastapi import Depends, FastAPI, Request, Response
-from fastapi.responses import JSONResponse, PlainTextResponse
-from pydantic import BaseModel
+from fastapi import Depends, FastAPI, HTTPException, Request
 
-from evserver.stores import Archive
+from evserver.stores import DirectoryStore
 from evserver.types import (
-    HASH_PATTERN,
-    OBJECT_TYPES,
-    USER_ID_PATTERN,
-    Hash,
-    ObjectType,
+    Content,
+    ContentId,
+    Manifest,
+    ManifestId,
+    Reference,
+    ReferenceId,
+    Snapshot,
+    SnapshotId,
+    User,
     UserId,
+    Workspace,
+    WorkspaceId,
 )
 
 
 class State(TypedDict):
-    archive: Archive
+    user_store: DirectoryStore[UserId, User]
+    workspace_store: DirectoryStore[WorkspaceId, Workspace]
+    snapshot_store: DirectoryStore[SnapshotId, Snapshot]
+    manifest_store: DirectoryStore[ManifestId, Manifest]
+    reference_store: DirectoryStore[ReferenceId, Reference]
+    content_store: DirectoryStore[ContentId, Content]
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[State]:
-    yield State(archive=Archive(Path("data")))
-
-
-app = FastAPI(lifespan=lifespan)
-
-ErrorCode = Literal["not_found", "conflict", "invalid_hash", "invalid_body", "internal"]
-
-ERROR_STATUS: dict[ErrorCode, int] = {
-    "not_found": 404,
-    "conflict": 409,
-    "invalid_hash": 422,
-    "invalid_body": 400,
-    "internal": 500,
-}
-
-
-class ErrorBody(BaseModel):
-    code: ErrorCode
-    message: str
-
-
-def error(code: ErrorCode, message: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=ERROR_STATUS[code],
-        content=ErrorBody(code=code, message=message).model_dump(),
+    root_path = Path("data")
+    user_store = DirectoryStore[UserId, User](root_path)
+    workspace_store = DirectoryStore[WorkspaceId, Workspace](root_path)
+    snapshot_store = DirectoryStore[SnapshotId, Snapshot](root_path)
+    manifest_store = DirectoryStore[ManifestId, Manifest](root_path)
+    reference_store = DirectoryStore[ReferenceId, Reference](root_path)
+    content_store = DirectoryStore[ContentId, Content](root_path)
+    yield State(
+        user_store=user_store,
+        workspace_store=workspace_store,
+        snapshot_store=snapshot_store,
+        manifest_store=manifest_store,
+        reference_store=reference_store,
+        content_store=content_store,
     )
 
 
-def get_archive(request: Request) -> Archive:
-    return request.state.archive
+application = FastAPI(lifespan=lifespan)
 
 
-ArchiveDep = Annotated[Archive, Depends(get_archive)]
+def get_user_store(request: Request) -> DirectoryStore[UserId, User]:
+    return request.state.user_store
 
 
-def validate_user_id(user_id: UserId) -> JSONResponse | None:
-    if not USER_ID_PATTERN.fullmatch(user_id):
-        return error("invalid_body", f'Invalid user id: "{user_id}".')
-    return None
+def get_workspace_store(request: Request) -> DirectoryStore[WorkspaceId, Workspace]:
+    return request.state.workspace_store
 
 
-def validate_hash(obj_hash: Hash) -> JSONResponse | None:
-    if not HASH_PATTERN.fullmatch(obj_hash):
-        return error("invalid_hash", f'Invalid hash: "{obj_hash}".')
-    return None
+def get_snapshot_store(request: Request) -> DirectoryStore[SnapshotId, Snapshot]:
+    return request.state.snapshot_store
 
 
-async def require_user(archive: Archive, user_id: UserId) -> JSONResponse | None:
-    if not await archive.contains_user(user_id):
-        return error("not_found", f'User: "{user_id}" does not exist.')
-    return None
+def get_manifest_store(request: Request) -> DirectoryStore[ManifestId, Manifest]:
+    return request.state.manifest_store
 
 
-@app.post(
-    "/user/register",
-    response_model=None,
-    status_code=201,
-    response_class=PlainTextResponse,
+def get_reference_store(request: Request) -> DirectoryStore[ReferenceId, Reference]:
+    return request.state.reference_store
+
+
+def get_content_store(request: Request) -> DirectoryStore[ContentId, Content]:
+    return request.state.content_store
+
+
+UserStoreDependency = Annotated[DirectoryStore[UserId, User], Depends(get_user_store)]
+WorkspaceStoreDependency = Annotated[
+    DirectoryStore[WorkspaceId, Workspace], Depends(get_workspace_store)
+]
+SnapshotDependency = Annotated[
+    DirectoryStore[SnapshotId, Snapshot], Depends(get_snapshot_store)
+]
+ManifestStoreDependency = Annotated[
+    DirectoryStore[ManifestId, Manifest], Depends(get_manifest_store)
+]
+ReferenceStoreDependency = Annotated[
+    DirectoryStore[ReferenceId, Reference], Depends(get_reference_store)
+]
+ContentStoreDependency = Annotated[
+    DirectoryStore[ContentId, Content], Depends(get_content_store)
+]
+
+
+@application.head(
+    "/user/{user_id}",
 )
-async def register_user(archive: ArchiveDep) -> UserId:
-    user_id = uuid.uuid4().hex
-    await archive.add_user(user_id)
-    return user_id
+async def head_user(user_id: UserId, user_store: UserStoreDependency) -> None:
+    if not await user_store.contains(user_id):
+        raise HTTPException(404)
 
 
-@app.post(
-    "/user/register/{user_id}",
-    response_model=None,
-    status_code=201,
-    response_class=PlainTextResponse,
+@application.get(
+    "/user/{user_id}",
 )
-async def claim_user(user_id: UserId, archive: ArchiveDep) -> UserId | JSONResponse:
-    if err := validate_user_id(user_id):
-        return err
-    if await archive.contains_user(user_id):
-        return error("conflict", f'User: "{user_id}" already exists.')
-    await archive.add_user(user_id)
-    return user_id
+async def get_user(user_id: UserId, user_store: UserStoreDependency) -> User:
+    if await user_store.contains(user_id):
+        return await user_store.get(user_id)
+    raise HTTPException(404)
 
 
-@app.delete("/user/{user_id}", response_model=None, response_class=PlainTextResponse)
-async def delete_user(user_id: UserId, archive: ArchiveDep) -> UserId | JSONResponse:
-    if err := await require_user(archive, user_id):
-        return err
-    await archive.delete_user(user_id)
-    return user_id
+@application.put(
+    "/user/{user_id}",
+)
+async def put_user(
+    user_id: UserId, user: User, user_store: UserStoreDependency
+) -> None:
+    await user_store.set(user_id, user)
 
 
-@app.get("/user/{user_id}", response_model=None)
-async def get_user(user_id: UserId, archive: ArchiveDep) -> list[Hash] | JSONResponse:
-    if err := await require_user(archive, user_id):
-        return err
-    return await archive.hashes(user_id, "workspace")
-
-
-def add_object_routes(obj_type: ObjectType) -> None:  # noqa: C901
-    path = f"/user/{{user_id}}/{obj_type}/{{obj_hash}}"
-
-    async def head_object(
-        user_id: UserId, obj_hash: Hash, archive: ArchiveDep
-    ) -> Response:
-        if err := validate_hash(obj_hash):
-            return err
-        if err := await require_user(archive, user_id):
-            return err
-        if not await archive.contains(user_id, obj_type, obj_hash):
-            return error("not_found", f'{obj_type}: "{obj_hash}" does not exist.')
-        return Response(status_code=200)
-
-    async def get_object(
-        user_id: UserId, obj_hash: Hash, archive: ArchiveDep
-    ) -> Response:
-        if err := validate_hash(obj_hash):
-            return err
-        if err := await require_user(archive, user_id):
-            return err
-        if not await archive.contains(user_id, obj_type, obj_hash):
-            return error("not_found", f'{obj_type}: "{obj_hash}" does not exist.')
-        return Response(
-            content=await archive.get(user_id, obj_type, obj_hash),
-            media_type="application/octet-stream",
-        )
-
-    async def put_object(
-        user_id: UserId, obj_hash: Hash, request: Request, archive: ArchiveDep
-    ) -> Response:
-        if err := validate_hash(obj_hash):
-            return err
-        if err := await require_user(archive, user_id):
-            return err
-        body = await request.body()
-        if blake3(body).hexdigest() != obj_hash:
-            return error("invalid_hash", "Body does not match the path hash.")
-        if await archive.contains(user_id, obj_type, obj_hash):
-            return PlainTextResponse(obj_hash, status_code=200)
-        await archive.put(user_id, obj_type, obj_hash, body)
-        return PlainTextResponse(obj_hash, status_code=201)
-
-    async def delete_object(
-        user_id: UserId, obj_hash: Hash, archive: ArchiveDep
-    ) -> Response:
-        if err := validate_hash(obj_hash):
-            return err
-        if err := await require_user(archive, user_id):
-            return err
-        if not await archive.contains(user_id, obj_type, obj_hash):
-            return error("not_found", f'{obj_type}: "{obj_hash}" does not exist.')
-        await archive.delete(user_id, obj_type, obj_hash)
-        return PlainTextResponse(obj_hash)
-
-    app.head(path, response_model=None)(head_object)
-    app.get(path, response_model=None)(get_object)
-    app.put(path, response_model=None, response_class=PlainTextResponse)(put_object)
-    app.delete(path, response_model=None, response_class=PlainTextResponse)(
-        delete_object
-    )
-
-
-for _obj_type in OBJECT_TYPES:
-    add_object_routes(_obj_type)
+@application.delete(
+    "/user/{user_id}",
+)
+async def delete_user(user_id: UserId, user_store: UserStoreDependency) -> None:
+    await user_store.delete(user_id)
 
 
 def main() -> None:
-    uvicorn.run("evserver:app", host="0.0.0.0", port=8000, workers=1)  # noqa: S104
+    uvicorn.run("evserver:application")

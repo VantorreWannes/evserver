@@ -13,6 +13,10 @@ ContentId = Id
 
 
 @dataclass(slots=True)
+class User: ...
+
+
+@dataclass(slots=True)
 class Content:
     data: bytes
 

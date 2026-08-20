@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 class DirectoryStore[K, V]:
     def __init__(self, root: Path) -> None:
+        root.mkdir(parents=True, exist_ok=True)
         self.root = root
 
     def _path(self, key: Id) -> Path:
@@ -17,12 +18,12 @@ class DirectoryStore[K, V]:
     async def contains(self, key: Id) -> bool:
         return self._path(key).exists()
 
-    async def set(self, key: Id, value: object) -> None:
+    async def set(self, key: Id, value: V) -> None:
         path = self._path(key)
         with path.open("wb") as f:
-            dill.dump(f, value)
+            dill.dump(value, f)
 
-    async def get(self, key: Id) -> None:
+    async def get(self, key: Id) -> V:
         path = self._path(key)
         with path.open("rb") as f:
             return dill.load(f)  # noqa: S301
