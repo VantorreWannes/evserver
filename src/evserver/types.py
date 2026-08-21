@@ -13,7 +13,8 @@ ContentId = Id
 
 
 @dataclass(slots=True)
-class User: ...
+class User:
+    id: UserId
 
 
 @dataclass(slots=True)
