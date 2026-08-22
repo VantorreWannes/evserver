@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, TypedDict
 
+import dill
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
 
@@ -117,8 +118,9 @@ async def get_user(user_id: UserId, user_store: UserStoreDependency) -> User:
     "/user/{user_id}",
 )
 async def put_user(
-    user_id: UserId, user: User, user_store: UserStoreDependency
+    user_id: UserId, request: Request, user_store: UserStoreDependency
 ) -> None:
+    user: User = dill.loads(await request.body())  # noqa: S301
     await user_store.set(user_id, user)
 
 
@@ -156,9 +158,10 @@ async def get_workspace(
 )
 async def put_workspace(
     workspace_id: WorkspaceId,
-    workspace: Workspace,
+    request: Request,
     workspace_store: WorkspaceStoreDependency,
 ) -> None:
+    workspace: Workspace = dill.loads(await request.body())  # noqa: S301
     await workspace_store.set(workspace_id, workspace)
 
 
@@ -198,9 +201,10 @@ async def get_snapshot(
 )
 async def put_snapshot(
     snapshot_id: SnapshotId,
-    snapshot: Snapshot,
+    request: Request,
     snapshot_store: SnapshotDependency,
 ) -> None:
+    snapshot: Snapshot = dill.loads(await request.body())  # noqa: S301
     await snapshot_store.set(snapshot_id, snapshot)
 
 
@@ -240,9 +244,10 @@ async def get_manifest(
 )
 async def put_manifest(
     manifest_id: ManifestId,
-    manifest: Manifest,
+    request: Request,
     manifest_store: ManifestStoreDependency,
 ) -> None:
+    manifest: Manifest = dill.loads(await request.body())  # noqa: S301
     await manifest_store.set(manifest_id, manifest)
 
 
@@ -282,9 +287,10 @@ async def get_reference(
 )
 async def put_reference(
     reference_id: ReferenceId,
-    reference: Reference,
+    request: Request,
     reference_store: ReferenceStoreDependency,
 ) -> None:
+    reference: Reference = dill.loads(await request.body())  # noqa: S301
     await reference_store.set(reference_id, reference)
 
 
@@ -324,9 +330,10 @@ async def get_content(
 )
 async def put_content(
     content_id: ContentId,
-    content: Content,
+    request: Request,
     content_store: ContentStoreDependency,
 ) -> None:
+    content: Content = dill.loads(await request.body())  # noqa: S301
     await content_store.set(content_id, content)
 
 
