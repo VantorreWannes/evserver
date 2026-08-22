@@ -348,4 +348,4 @@ async def delete_content(
 
 
 def main() -> None:
-    uvicorn.run("evserver:application")
+    uvicorn.run("evserver:application", host="0.0.0.0", port=80)  # noqa: S104
