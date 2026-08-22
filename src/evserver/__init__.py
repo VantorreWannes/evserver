@@ -36,12 +36,12 @@ class State(TypedDict):
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[State]:
     root_path = Path("data")
-    user_store = DirectoryStore[UserId, User](root_path)
-    workspace_store = DirectoryStore[WorkspaceId, Workspace](root_path)
-    snapshot_store = DirectoryStore[SnapshotId, Snapshot](root_path)
-    manifest_store = DirectoryStore[ManifestId, Manifest](root_path)
-    reference_store = DirectoryStore[ReferenceId, Reference](root_path)
-    content_store = DirectoryStore[ContentId, Content](root_path)
+    user_store = DirectoryStore[UserId, User](root_path / "users")
+    workspace_store = DirectoryStore[WorkspaceId, Workspace](root_path / "workspaces")
+    snapshot_store = DirectoryStore[SnapshotId, Snapshot](root_path / "snapshots")
+    manifest_store = DirectoryStore[ManifestId, Manifest](root_path / "manifests")
+    reference_store = DirectoryStore[ReferenceId, Reference](root_path / "references")
+    content_store = DirectoryStore[ContentId, Content](root_path / "contents")
     yield State(
         user_store=user_store,
         workspace_store=workspace_store,
