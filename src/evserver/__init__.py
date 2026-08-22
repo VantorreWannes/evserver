@@ -5,7 +5,7 @@ from typing import Annotated, TypedDict
 
 import dill
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
 from evserver.stores import DirectoryStore
 from evserver.types import (
@@ -36,12 +36,12 @@ class State(TypedDict):
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[State]:
     root_path = Path("data")
-    user_store = DirectoryStore[UserId, User](root_path)
-    workspace_store = DirectoryStore[WorkspaceId, Workspace](root_path)
-    snapshot_store = DirectoryStore[SnapshotId, Snapshot](root_path)
-    manifest_store = DirectoryStore[ManifestId, Manifest](root_path)
-    reference_store = DirectoryStore[ReferenceId, Reference](root_path)
-    content_store = DirectoryStore[ContentId, Content](root_path)
+    user_store = DirectoryStore[UserId, User](root_path / "users")
+    workspace_store = DirectoryStore[WorkspaceId, Workspace](root_path / "workspaces")
+    snapshot_store = DirectoryStore[SnapshotId, Snapshot](root_path / "snapshots")
+    manifest_store = DirectoryStore[ManifestId, Manifest](root_path / "manifests")
+    reference_store = DirectoryStore[ReferenceId, Reference](root_path / "references")
+    content_store = DirectoryStore[ContentId, Content](root_path / "contents")
     yield State(
         user_store=user_store,
         workspace_store=workspace_store,
@@ -108,9 +108,9 @@ async def head_user(user_id: UserId, user_store: UserStoreDependency) -> None:
 @application.get(
     "/user/{user_id}",
 )
-async def get_user(user_id: UserId, user_store: UserStoreDependency) -> User:
+async def get_user(user_id: UserId, user_store: UserStoreDependency) -> Response:
     if await user_store.contains(user_id):
-        return await user_store.get(user_id)
+        return Response(dill.dumps(await user_store.get(user_id)))
     raise HTTPException(404)
 
 
@@ -147,9 +147,9 @@ async def head_workspace(
 )
 async def get_workspace(
     workspace_id: WorkspaceId, workspace_store: WorkspaceStoreDependency
-) -> Workspace:
+) -> Response:
     if await workspace_store.contains(workspace_id):
-        return await workspace_store.get(workspace_id)
+        return Response(dill.dumps(await workspace_store.get(workspace_id)))
     raise HTTPException(404)
 
 
@@ -190,9 +190,9 @@ async def head_snapshot(
 )
 async def get_snapshot(
     snapshot_id: SnapshotId, snapshot_store: SnapshotDependency
-) -> Snapshot:
+) -> Response:
     if await snapshot_store.contains(snapshot_id):
-        return await snapshot_store.get(snapshot_id)
+        return Response(dill.dumps(await snapshot_store.get(snapshot_id)))
     raise HTTPException(404)
 
 
@@ -233,9 +233,9 @@ async def head_manifest(
 )
 async def get_manifest(
     manifest_id: ManifestId, manifest_store: ManifestStoreDependency
-) -> Manifest:
+) -> Response:
     if await manifest_store.contains(manifest_id):
-        return await manifest_store.get(manifest_id)
+        return Response(dill.dumps(await manifest_store.get(manifest_id)))
     raise HTTPException(404)
 
 
@@ -276,9 +276,9 @@ async def head_reference(
 )
 async def get_reference(
     reference_id: ReferenceId, reference_store: ReferenceStoreDependency
-) -> Reference:
+) -> Response:
     if await reference_store.contains(reference_id):
-        return await reference_store.get(reference_id)
+        return Response(dill.dumps(await reference_store.get(reference_id)))
     raise HTTPException(404)
 
 
@@ -319,9 +319,9 @@ async def head_content(
 )
 async def get_content(
     content_id: ContentId, content_store: ContentStoreDependency
-) -> Content:
+) -> Response:
     if await content_store.contains(content_id):
-        return await content_store.get(content_id)
+        return Response(dill.dumps(await content_store.get(content_id)))
     raise HTTPException(404)
 
 
