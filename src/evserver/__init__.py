@@ -128,7 +128,7 @@ async def put_user(
     "/user/{user_id}",
 )
 async def delete_user(user_id: UserId, user_store: UserStoreDependency) -> None:
-    if user_store.contains(user_id):
+    if await user_store.contains(user_id):
         await user_store.delete(user_id)
 
 
@@ -171,7 +171,7 @@ async def put_workspace(
 async def delete_workspace(
     workspace_id: WorkspaceId, workspace_store: WorkspaceStoreDependency
 ) -> None:
-    if workspace_store.contains(workspace_id):
+    if await workspace_store.contains(workspace_id):
         await workspace_store.delete(workspace_id)
 
 
@@ -214,7 +214,7 @@ async def put_snapshot(
 async def delete_snapshot(
     snapshot_id: SnapshotId, snapshot_store: SnapshotDependency
 ) -> None:
-    if snapshot_store.contains(snapshot_id):
+    if await snapshot_store.contains(snapshot_id):
         await snapshot_store.delete(snapshot_id)
 
 
@@ -257,7 +257,7 @@ async def put_manifest(
 async def delete_manifest(
     manifest_id: ManifestId, manifest_store: ManifestStoreDependency
 ) -> None:
-    if manifest_store.contains(manifest_id):
+    if await manifest_store.contains(manifest_id):
         await manifest_store.delete(manifest_id)
 
 
@@ -300,7 +300,7 @@ async def put_reference(
 async def delete_reference(
     reference_id: ReferenceId, reference_store: ReferenceStoreDependency
 ) -> None:
-    if reference_store.contains(reference_id):
+    if await reference_store.contains(reference_id):
         await reference_store.delete(reference_id)
 
 
@@ -343,7 +343,7 @@ async def put_content(
 async def delete_content(
     content_id: ContentId, content_store: ContentStoreDependency
 ) -> None:
-    if content_store.contains(content_id):
+    if await content_store.contains(content_id):
         await content_store.delete(content_id)
 
 
