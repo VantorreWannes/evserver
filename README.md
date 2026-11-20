@@ -1,52 +1,32 @@
-# EasyVersion
+# evserver
 
-### Goals
+HTTP archive server for EasyVersion objects.
 
-- **Many Archives:** Store in many archives at once.
-- **Emergent Complexity:** Small implementation surface with reasonable usage requirements.
+## Scope
 
-## Client
+Stores and serves EasyVersion objects over HTTP.
 
-Clients gather and send information to archive endpoints.
+Does not manage client workspaces, local configuration, or user registration workflows.
 
-### Commands
+## Public API
 
-- All commands accept `--help` / `-h`.
-- All commands accept `--verbose` / `-v`.
-- **`ev archive register <archive:URL> [user:ID]`:** Claim a specific User ID on the given archive. User ID is random if omitted.
-- **`ev archive unregister <archive:URL> <user:ID>`:** Requests the archive to forget this User ID.
-- **`ev archive login <archive:URL> <user:ID> [workspace:PATH]`:** Sets this combination of Archive URL + User ID as active for this workspace.
-- **`ev archive logout <archive:URL> <user:ID> [workspace:PATH]`:** Sets this combination of Archive URL + User ID as unactive for this workspace.
-- **`ev save <--note <note:TEXT> | -n <note:TEXT> [workspace:PATH]`:** Save the workspace's current state as a new Snapshot, with the note when provided.
-- **`ev list [workspace:PATH]`:** List the Workspace's Snapshots. Also showing notes where set.
-- **`ev clone <source:PATH> <target:PATH> [--snapshot <snapshot:ID> | -s <snapshot:ID>]`:** Clone the source Workspace to the target path, which may not exist yet. Clone the current workspace state if omitted.
-- **`ev forget {--snapshot <snapshot:ID> | -v <snapshot:ID> | --all | -a} [workspace:PATH]`:** Forget the specified snapshot(s) for the given Workspace.
+Run the server with `evserver` (listens on `0.0.0.0:80`).
 
-## Archive
+Each resource type (`user`, `workspace`, `snapshot`, `manifest`, `reference`, `content`) exposes four endpoints:
 
-Clients recieve and save information from clients through their URL.
+| Method   | Path            | Contract                                             |
+| -------- | --------------- | ---------------------------------------------------- |
+| `HEAD`   | `/{type}/{id}`  | Returns `200` if the ID exists, `404` otherwise.     |
+| `GET`    | `/{type}/{id}`  | Returns the `dill`-serialized object, or `404`.      |
+| `PUT`    | `/{type}/{id}`  | Stores the `dill`-serialized object from the body.   |
+| `DELETE` | `/{type}/{id}`  | Deletes the object for the given ID if it exists.    |
 
-### Types
+## Ownership
 
-Five distinct types, forming one chain from workspace to content:
+- `evserver` is the single source of truth for persisted archive data under `data/` (`/app/data` in Docker).
+- Clients own workspace state, ID generation, and object construction.
 
-| Type        | Contents                                |
-| ----------- | --------------------------------------- |
-| `user`      | Metadata about the user account         |
-| `workspace` | An array of snapshot hashes             |
-| `snapshot`  | A manifest hash and an optional note    |
-| `manifest`  | An array of reference hashes            |
-| `reference` | A relative file path and a content hash |
-| `content`   | Raw byte data                           |
+## Compatibility
 
-### Endpoints
-
-- **`HEAD /type/<type:ID>`:** Check whether the Type ID already exists.
-- **`GET /type/<type:ID>`:** Returns an object with the Type's data.
-- **`PUT /type/<type:ID>`:** Sets the object with the Type's data.
-- **`DELETE /type/<type:ID>`:** Forget the given Type ID.
-
-### Invariants
-
-- All in workspace configuration, will be done under `./ev` in the workspace root.
-- Archive URL + User ID login configurations are unique per workspace.
+- Request and response payloads use `dill`-serialized instances of `evserver.types` (`User`, `Workspace`, `Snapshot`, `Manifest`, `Reference`, `Content`).
+- Changing type definitions or module paths in `evserver.types` breaks compatibility with existing stored data and clients.
