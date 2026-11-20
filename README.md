@@ -14,12 +14,12 @@ Run the server with `evserver` (listens on `0.0.0.0:80`).
 
 Each resource type (`user`, `workspace`, `snapshot`, `manifest`, `reference`, `content`) exposes four endpoints:
 
-| Method   | Path            | Contract                                             |
-| -------- | --------------- | ---------------------------------------------------- |
-| `HEAD`   | `/{type}/{id}`  | Returns `200` if the ID exists, `404` otherwise.     |
-| `GET`    | `/{type}/{id}`  | Returns the `dill`-serialized object, or `404`.      |
-| `PUT`    | `/{type}/{id}`  | Stores the `dill`-serialized object from the body.   |
-| `DELETE` | `/{type}/{id}`  | Deletes the object for the given ID if it exists.    |
+| Method   | Path           | Contract                                           |
+| -------- | -------------- | -------------------------------------------------- |
+| `HEAD`   | `/{type}/{id}` | Returns `200` if the ID exists, `404` otherwise.   |
+| `GET`    | `/{type}/{id}` | Returns the `dill`-serialized object, or `404`.    |
+| `PUT`    | `/{type}/{id}` | Stores the `dill`-serialized object from the body. |
+| `DELETE` | `/{type}/{id}` | Deletes the object for the given ID if it exists.  |
 
 ## Ownership
 
