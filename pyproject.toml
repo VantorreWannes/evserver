@@ -3,9 +3,7 @@ name = "evserver"
 version = "0.4.0"
 description = "Add your description here"
 readme = "README.md"
-authors = [
-    { name = "Wannes Vantorre", email = "vantorrewannes@gmail.com" }
-]
+authors = [{ name = "Wannes Vantorre", email = "vantorrewannes@gmail.com" }]
 requires-python = ">=3.14"
 dependencies = [
     "aiofiles>=25.1.0",
@@ -23,7 +21,20 @@ build-backend = "uv_build"
 
 [tool.ruff.lint]
 select = ["ALL"]
-ignore = ["D203", "D213", "COM812", "ISC001", "CPY001", "D419", "D100", "D101", "D102", "D103", "D104", "D107"]
+ignore = [
+    "D203",
+    "D213",
+    "COM812",
+    "ISC001",
+    "CPY001",
+    "D419",
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D107",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
