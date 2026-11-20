@@ -1,3 +1,4 @@
+from argparse import ArgumentParser
 from collections.abc import AsyncGenerator  # noqa: TC003
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -348,4 +349,8 @@ async def delete_content(
 
 
 def main() -> None:
-    uvicorn.run("evserver:application")
+    parser = ArgumentParser()
+    parser.add_argument("--host", default="0.0.0.0")  # noqa: S104
+    parser.add_argument("--port", type=int, default=80)
+    arguments = parser.parse_args()
+    uvicorn.run("evserver:application", host=arguments.host, port=arguments.port)
